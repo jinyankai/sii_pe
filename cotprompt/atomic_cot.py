@@ -61,7 +61,7 @@ def construct_prompt(d):
     user_prompt_lines.append(
         "   - **元素分析：** 输入中特定位置 `(行, 列)` 的元素与输出中相同或不同位置的元素有何关系？这种变化是基于它的邻居还是它的绝对位置？")
 
-    user_prompt_lines.append("\n2. **形成规则：** 总结出一个能解释 *所有* 训练样本的最简洁的规则。并验证")
+    user_prompt_lines.append("\n2. **形成规则：** 总结出一个能解释 *所有* 训练样本的最简洁的规则")
 
     user_prompt_lines.append("\n3. **应用规则：** 将这条规则应用到“测试输入”上，以产生“测试输出”。")
 

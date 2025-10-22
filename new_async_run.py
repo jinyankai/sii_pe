@@ -5,15 +5,18 @@ import asyncio
 # 移除 aiohttp，导入 openai 相关的库
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError
 from collections import Counter
+import random  # [!!] 修正：添加了缺失的 import
 
 # 导入考生需要实现的两个函数
 # (我假设 construct_cot.py 与 run.py 在同一目录下)
 # 注意：根据你的目录结构，这个导入可能需要调整
 # 假设 construct_cot.py 在当前目录
-from cotprompt.atomic_cot import construct_prompt, parse_output
+# from cotprompt.atomic_cot import construct_prompt, parse_output # [!!] 修正：注释掉错误的导入
+# from cotprompt.atomic_scot_zh import (construct_prompt, parse_output)  # [!!] 修正：从您提供的本地文件名导入
 
-# from cotprompt.atomic_cot  import construct_prompt, parse_output # 原始导入
-
+from cotprompt.improved_cot import construct_prompt, parse_output # 原始导入
+name = "improved_cot_en"  # 提示方法名称
+print("prompt method: ",name)  # 输出当前使用的提示方法名称
 # --- 配置区 ---
 API_KEY = "sk-5d1d1180313c45589472a340afe4a5f5"  # 请替换为你的 API Key
 MODEL_NAME = "deepseek-chat"
@@ -28,7 +31,7 @@ QUICK_TEST_TASK_INDEX = 0  # 测试 val.jsonl 中的第几个任务 (从 0 开�
 
 # --- 异步配置 ---
 # ... (保持不变) ...
-NUM_SAMPLES = 10  # 每个任务的采样次数 (将并行执行)
+NUM_SAMPLES = 5  # 每个任务的采样次数 (将并行执行)
 TEMPERATURE = 1.0
 MAX_CONCURRENT_REQUESTS = 20  # 同时允许的最大 API 请求数
 RETRY_ATTEMPTS = 3  # API 请求失败时的重试次数
@@ -41,7 +44,6 @@ MAX_TOKENS = 8000  # 最大 token 保持 8000
 
 def load_data(file_path, quick_test=False, task_index=0):
     """从jsonl文件加载数据 (保持不变)"""
-    # ... (函数体保持不变) ...
     tasks = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -66,8 +68,7 @@ def load_data(file_path, quick_test=False, task_index=0):
                 return []
         # shuffle the task
         # print(tasks)  # 调试时使用
-        import random
-        random.shuffle(tasks)
+        # random.shuffle(tasks)
         return tasks
     except FileNotFoundError:
         print(f"Error: 验证文件 '{file_path}' 未找到。")
@@ -96,12 +97,14 @@ async def async_call_llm_api(client, semaphore, messages, temperature, model_nam
                 return response.choices[0].message.content
 
             # 捕获 openai 特定的异常
+            # [!!] 修正：修复缩进
             except (RateLimitError, APITimeoutError, APIConnectionError) as e:
                 print(f"API 调用失败 (尝试 {attempt + 1}/{RETRY_ATTEMPTS}): {e}")
                 if attempt < RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(RETRY_DELAY * (attempt + 1))
                 else:
                     return None  # 所有重试均失败
+            # [!!] 修正：修复缩进
             except Exception as e:
                 # 捕获其他意外错误
                 print(f"API 调用中发生意外错误 (尝试 {attempt + 1}/{RETRY_ATTEMPTS}): {e}")
@@ -113,7 +116,6 @@ async def async_call_llm_api(client, semaphore, messages, temperature, model_nam
 
 def evaluate_prediction(prediction, ground_truth):
     """评估预测是否与真实答案完全匹配 (保持不变)"""
-    # ... (函数体保持不变) ...
     if not isinstance(prediction, list) or not isinstance(ground_truth, list):
         return 0
     if len(prediction) != len(ground_truth):
@@ -128,7 +130,8 @@ def evaluate_prediction(prediction, ground_truth):
 
 async def run_evaluation(tasks, api_key, base_url, num_samples, temperature):
     """(异步) 运行完整评估流程 (使用 AsyncOpenAI)"""
-    total_correct = 0
+    # [!! 已修改 !!] total_correct 重命名为 total_score_sum，用于累加平均分
+    total_score_sum = 0.0
     total_tasks = len(tasks)
 
     # 创建信号量以限制并发数
@@ -139,19 +142,6 @@ async def run_evaluation(tasks, api_key, base_url, num_samples, temperature):
         api_key=api_key,
         base_url=base_url,
     )
-
-    # aiohttp.ClientSession 已被移除
-    # async with aiohttp.ClientSession() as session: # (已移除)
-
-    # 注意：AsyncOpenAI 客户端实例通常不需要像 session 一样使用 'async with'
-    # 它内部管理连接池，但我们需要确保在完成后正确关闭
-    # 不过对于这个脚本的生命周期，在 main 结束时自动关闭即可
-    # 或者我们可以在这里使用 async with，如果 openai 库支持的话
-    # 查阅文档后，推荐的方式是在 main 函数管理 client 生命周期，或者在这里管理
-
-    # 为了保持结构类似，我们假设 client 在这个函数内有效
-    # (或者在 main 中创建并传入)
-    # 这里我们在函数内部创建它
 
     try:
         for i, task in enumerate(tasks):
@@ -169,7 +159,7 @@ async def run_evaluation(tasks, api_key, base_url, num_samples, temperature):
                 print("---------------------------------")
 
             # --- 并行执行 ---
-            api_tasks = []
+            api_tasks = []  # [!!] 修正：在这里初始化
             for j in range(num_samples):
                 api_tasks.append(
                     asyncio.create_task(
@@ -184,6 +174,7 @@ async def run_evaluation(tasks, api_key, base_url, num_samples, temperature):
 
             predictions = []
             for j, raw_output in enumerate(raw_outputs):
+                # [!!] 修正：修复缩进
                 if raw_output:
                     if QUICK_TEST:
                         print(f"  - [快速测试] Sample {j + 1} 原始输出:\n{raw_output}")
@@ -191,49 +182,73 @@ async def run_evaluation(tasks, api_key, base_url, num_samples, temperature):
                     parsed_grid = parse_output(raw_output)
                     # print(parsed_grid)
 
+                    # [!!] 修正：修复缩进
                     if parsed_grid and isinstance(parsed_grid, list):
+                        # [!! 已修改 !!] 存储为元组，以便后续比较
                         predictions.append(tuple(map(tuple, parsed_grid)))
                     else:
                         print(f"  - Sample {j + 1} 解析失败。")
+                # [!!] 修正：修复缩进
                 else:
                     print(f"  - Sample {j + 1} API 请求失败。")
 
+            # [!!] 修正：修复缩进
             if not predictions:
                 print("  - Result: INCORRECT (没有有效的解析结果)")
                 print(f"    Ground Truth: {task['test'][0]['output']}")
-                continue
+                continue  # [!!] 修正：修复缩进
 
-            # 自洽性投票 (逻辑不变)
-            vote_counts = Counter(predictions)
-            most_common_result = vote_counts.most_common(1)
+            # [!! 已修改 !!] 移除自洽性投票逻辑，替换为平均分计算
 
-            most_common_prediction_as_tuple = most_common_result[0][0]
-            final_prediction = list(map(list, most_common_prediction_as_tuple))
+            # [!!] 修正：修复缩进
+            ground_truth_list = task['test'][0]['output']
+            # 将标准答案也转换为元组格式，以便直接比较
+            ground_truth_tuple = tuple(map(tuple, ground_truth_list))
 
-            ground_truth = task['test'][0]['output']
-            score = evaluate_prediction(final_prediction, ground_truth)
+            correct_samples = 0
 
-            if score == 1:
-                total_correct += 1
-                print(f"  - Result: CORRECT (投票数: {most_common_result[0][1]}/{num_samples})")
-            else:
-                print("  - Result: INCORRECT")
-                print(f"    Predicted: {final_prediction}")
-                print(f"    Ground Truth: {ground_truth}")
+            # 遍历 10 (NUM_SAMPLES) 次采样的结果 (它们是元组)
+            for pred_tuple in predictions:
+                # 检查这个样本的预测 (pred_tuple) 是否与标准答案 (ground_truth_tuple) 完全一致
+                if pred_tuple == ground_truth_tuple:
+                    correct_samples += 1
+
+            # 计算这个任务的平均分 (0.0 到 1.0 之间)
+            task_score = correct_samples / num_samples
+
+            # 累加到总分
+            total_score_sum += task_score
+
+            # 更新打印信息
+            print(f"  - Result: Score {task_score:.2f} ({correct_samples}/{num_samples} samples correct)")
+
+            # 如果分数不是 1.0（全对）也不是 0.0（全错），则打印标准答案以供比较
+            if 0.0 < task_score < 1.0:
+                print(f"    - (Ground Truth: {ground_truth_list})")
+
+            # 如果分数是 0.0 (全错)，打印最常见的错误答案和标准答案
+            if task_score == 0.0:
+                vote_counts = Counter(predictions)
+                most_common_pred_tuple, count = vote_counts.most_common(1)[0]
+                print(
+                    f"    - (Most common *wrong* answer [seen {count} times]: {list(map(list, most_common_pred_tuple))})")
+                print(f"    - (Ground Truth: {ground_truth_list})")
+
+    # [!!] 修正：修复缩进
     finally:
-        # 确保在使用完后关闭客户端（尽管在这个脚本中可能不是严格必须）
-        # await client.close() # AsyncOpenAI 似乎没有公开的 close()
         pass
 
-    accuracy = total_correct / total_tasks if total_tasks > 0 else 0
+    # [!! 已修改 !!] 更新最终结果的计算和打印
+    average_score = total_score_sum / total_tasks if total_tasks > 0 else 0
     print(f"\n--- Evaluation Finished ---")
     print(f"Total Tasks: {total_tasks}")
-    print(f"Correct Predictions: {total_correct}")
-    print(f"Final Accuracy (with Self-Consistency): {accuracy:.2%}")
+    print(f"Sum of Average Scores: {total_score_sum:.2f}")  # 显示总得分
+    print(f"Final Average Score: {average_score:.2%}")  # 显示最终平均分
 
 
 async def main():
     """异步主函数"""
+    # [!!] 修正：修复缩进
     if not API_KEY:
         print("Error: API_KEY 未在脚本中设置。")
         return
@@ -264,5 +279,7 @@ async def main():
 
 # --- 主程序入口 ---
 if __name__ == "__main__":
+    # [!!] 修正：修复缩进
     # 使用 asyncio.run() 来启动异步主函数
     asyncio.run(main())
+
